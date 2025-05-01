@@ -20,8 +20,7 @@ func NewFreightQuotationSystem(marketplace *Marketplace) *FreightQuotationSystem
 	}
 }
 
-// CreateQuote creates a new freight quote with validations
-func (fqs *FreightQuotationSystem) CreateQuote(serviceCategory ServiceCategory, cargoType CargoType, packagingMode PackagingMode, origin, destination string, transportationMode TransportationMode, rate float64, validUntil time.Time) (FreightQuote, error) {
+func (fqs *FreightQuotationSystem) CreateQuote(serviceCategory ServiceCategory, cargoType CargoType, packagingMode PackagingMode, originCode, destinationCode string, transportationMode TransportationMode, rate float64, validUntil time.Time) (FreightQuote, error) {
 	fqs.mutex.Lock()
 	defer fqs.mutex.Unlock()
 
@@ -32,7 +31,31 @@ func (fqs *FreightQuotationSystem) CreateQuote(serviceCategory ServiceCategory, 
 		return FreightQuote{}, errors.New("validUntil must be in the future")
 	}
 
-	quote := fqs.marketplace.CreateFreightQuote(serviceCategory, cargoType, packagingMode, origin, destination, transportationMode, rate, validUntil)
+	// Validate Transit service category restrictions
+	if serviceCategory == Transit {
+		if transportationMode != Air && transportationMode != Sea {
+			return FreightQuote{}, errors.New("Transit service category can only be Air or Sea transportation mode")
+		}
+	}
+
+	// Validate origin and destination codes based on transportation mode
+	if transportationMode == Air {
+		if !validIATAAirportCodes[originCode] {
+			return FreightQuote{}, errors.New("origin code is not a valid IATA airport code")
+		}
+		if !validIATAAirportCodes[destinationCode] {
+			return FreightQuote{}, errors.New("destination code is not a valid IATA airport code")
+		}
+	} else if transportationMode == Sea {
+		if !validIMOSeraportCodes[originCode] {
+			return FreightQuote{}, errors.New("origin code is not a valid IMO seaport code")
+		}
+		if !validIMOSeraportCodes[destinationCode] {
+			return FreightQuote{}, errors.New("destination code is not a valid IMO seaport code")
+		}
+	}
+
+	quote := fqs.marketplace.CreateFreightQuote(serviceCategory, cargoType, packagingMode, originCode, destinationCode, transportationMode, rate, validUntil)
 	return quote, nil
 }
 
