@@ -1,19 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
+import Navigation from './components/Navigation';
 
-function App() {
+const App = () => {
+  const [currentPage, setCurrentPage] = useState('dashboard');
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'dashboard':
+        return <div className="p-6">Welcome to the Dashboard</div>;
+      case 'membership':
+        return <div className="p-6">Membership Management</div>;
+      case 'marketplace':
+        return <div className="p-6">Marketplace Listings</div>;
+      case 'governance':
+        return <div className="p-6">Governance Proposals</div>;
+      case 'disputes':
+        return <div className="p-6">Dispute Resolution</div>;
+      case 'profile':
+        return <div className="p-6">User Profile</div>;
+      default:
+        return <div className="p-6">Page Not Found</div>;
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
-      <header className="text-3xl font-semibold mb-6 text-gray-800">
-        Logistics Marketplace Dashboard
-      </header>
-      <main className="w-full max-w-4xl bg-white rounded-lg shadow p-6">
-        <p className="text-gray-700">
-          Welcome to the Logistics Marketplace frontend interface.
-        </p>
-        {/* Add more components and UI elements here */}
-      </main>
+    <div className="min-h-screen bg-gray-50">
+      <Navigation currentPage={currentPage} onNavigate={setCurrentPage} />
+      <main>{renderPage()}</main>
     </div>
   );
-}
+};
 
 export default App;
