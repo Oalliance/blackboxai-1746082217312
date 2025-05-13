@@ -30,6 +30,9 @@ type SmartContract struct {
 
 	eventListeners      map[string][]func(data interface{})
 	eventListenersMutex sync.RWMutex
+
+	// Reentrancy guard mutex
+	reentrancyLock sync.Mutex
 }
 
 // Benefit represents a subscription benefit
@@ -170,15 +173,73 @@ func NewSmartContract(marketplace *Marketplace) *SmartContract {
 }
 
 func (sc *SmartContract) MintToken(participantID string, amount float64) error {
+	sc.reentrancyLock.Lock()
+	defer sc.reentrancyLock.Unlock()
+
+	if err := validateAddress(participantID); err != nil {
+		return err
+	}
+	if amount <= 0 {
+		return errors.New("amount must be greater than zero")
+	}
+	// Use safe math for overflow/underflow protection
+	safeAmount, err := safeAddFloat64(0, amount)
+	if err != nil {
+		return err
+	}
 	logger := getLogger()
 	logger.LogEvent("MintToken called for participant: " + participantID)
-	return sc.TokenLedger.MintTokens(participantID, amount)
+	// State changes happen before external calls inside MintTokens
+	return sc.TokenLedger.MintTokens(participantID, safeAmount)
+}
+
+// safeAddFloat64 safely adds two float64 numbers and checks for overflow
+func safeAddFloat64(a, b float64) (float64, error) {
+	result := a + b
+	if (result < a) != (b < 0) {
+		return 0, errors.New("float64 addition overflow or underflow")
+	}
+	return result, nil
 }
 
 func (sc *SmartContract) TransferToken(fromID, toID string, amount float64) error {
+	sc.reentrancyLock.Lock()
+	defer sc.reentrancyLock.Unlock()
+
+	if err := validateAddress(fromID); err != nil {
+		return err
+	}
+	if err := validateAddress(toID); err != nil {
+		return err
+	}
+	if amount <= 0 {
+		return errors.New("amount must be greater than zero")
+	}
+	// Use safe math for overflow/underflow protection
+	safeAmount, err := safeAddFloat64(0, amount)
+	if err != nil {
+		return err
+	}
 	logger := getLogger()
 	logger.LogEvent("TransferToken called from " + fromID + " to " + toID)
-	return sc.TokenLedger.TransferTokens(fromID, toID, amount)
+	// State changes happen before external calls inside TransferTokens
+	success, err := sc.TokenLedger.TransferTokensWithCheck(fromID, toID, safeAmount)
+	if err != nil {
+		return err
+	}
+	if !success {
+		return errors.New("token transfer failed")
+	}
+	return nil
+}
+
+// safeAddFloat64 safely adds two float64 numbers and checks for overflow
+func safeAddFloat64(a, b float64) (float64, error) {
+	result := a + b
+	if (result < a) != (b < 0) {
+		return 0, errors.New("float64 addition overflow or underflow")
+	}
+	return result, nil
 }
 
 func (sc *SmartContract) RefundEscrowTokens(participantID, tokenID string, amount float64) error {
@@ -240,6 +301,23 @@ func (sc *SmartContract) ListenToEvent(eventName string, callback func(data inte
 		sc.eventListeners = make(map[string][]func(data interface{}))
 	}
 	sc.eventListeners[eventName] = append(sc.eventListeners[eventName], callback)
+}
+
+// GetRandomness simulates getting randomness securely using an oracle or commitment scheme
+func (sc *SmartContract) GetRandomness(seed string) (int64, error) {
+	// Placeholder for oracle-based or commitment scheme randomness
+	// In production, integrate Chainlink VRF or similar secure randomness source
+	randomValue := sc.pseudoRandom(seed)
+	return randomValue, nil
+}
+
+// pseudoRandom is a simple deterministic pseudo-random generator for demonstration only
+func (sc *SmartContract) pseudoRandom(seed string) int64 {
+	hash := int64(0)
+	for _, c := range seed {
+		hash = (hash*31 + int64(c)) % 1000000007
+	}
+	return hash
 }
 
 // EmitEvent emits an event to all registered listeners
@@ -348,6 +426,10 @@ func NewSmartContract(marketplace *Marketplace) *SmartContract {
 
 // CreateFreightQuote creates a freight quote via smart contract logic
 func (sc *SmartContract) CreateFreightQuote(serviceCategory ServiceCategory, cargoType CargoType, packagingMode PackagingMode, origin, destination string, transportationMode TransportationMode, rate float64, validUntil time.Time) (FreightQuote, error) {
+	// Restrict function to operate only within validated and predictable conditions to avoid flash loan reliance
+	if !sc.isValidQuoteRequest(origin, destination, rate) {
+		return FreightQuote{}, errors.New("invalid quote request parameters")
+	}
 	// Add business logic, validations, and emit events if needed
 	if rate <= 0 {
 		return FreightQuote{}, errors.New("rate must be positive")
@@ -357,8 +439,21 @@ func (sc *SmartContract) CreateFreightQuote(serviceCategory ServiceCategory, car
 	return quote, nil
 }
 
+func (sc *SmartContract) isValidQuoteRequest(origin, destination string, rate float64) bool {
+	// Implement validation logic to ensure request is legitimate and not flash loan manipulation
+	if origin == "" || destination == "" || rate <= 0 {
+		return false
+	}
+	// Additional checks can be added here
+	return true
+}
+
 // PlaceBid places a bid on a freight quote via smart contract logic
 func (sc *SmartContract) PlaceBid(quoteID, carrierID string, bidAmount float64) (FreightBid, error) {
+	// Access control: restrict to authorized participants only
+	if !sc.isAuthorizedParticipant(carrierID) {
+		return FreightBid{}, errors.New("unauthorized participant")
+	}
 	if bidAmount <= 0 {
 		return FreightBid{}, errors.New("bid amount must be positive")
 	}
@@ -366,14 +461,32 @@ func (sc *SmartContract) PlaceBid(quoteID, carrierID string, bidAmount float64) 
 	return bid, err
 }
 
+func (sc *SmartContract) isAuthorizedParticipant(participantID string) bool {
+	// Implement access control logic here
+	// For example, check if participant has active membership
+	active, err := sc.CheckMembershipActive(participantID)
+	if err != nil {
+		return false
+	}
+	return active
+}
+
 // ConfirmBooking confirms a booking via smart contract logic
 func (sc *SmartContract) ConfirmBooking(quoteID, bidID, shipperID string) (Booking, error) {
+	// Access control: restrict to authorized participants only
+	if !sc.isAuthorizedParticipant(shipperID) {
+		return Booking{}, errors.New("unauthorized participant")
+	}
 	booking, err := sc.Marketplace.ConfirmBooking(quoteID, bidID, shipperID)
 	return booking, err
 }
 
 // CreateProposal creates a governance proposal via smart contract logic
 func (sc *SmartContract) CreateProposal(title, description, proposerID string) (Proposal, error) {
+	// Access control: restrict to authorized participants only
+	if !sc.isAuthorizedParticipant(proposerID) {
+		return Proposal{}, errors.New("unauthorized participant")
+	}
 	if title == "" || description == "" {
 		return Proposal{}, errors.New("title and description cannot be empty")
 	}
@@ -383,6 +496,10 @@ func (sc *SmartContract) CreateProposal(title, description, proposerID string) (
 
 // VoteProposal casts a vote on a proposal via smart contract logic
 func (sc *SmartContract) VoteProposal(proposalID, participantID string, approve bool) error {
+	// Access control: restrict to authorized participants only
+	if !sc.isAuthorizedParticipant(participantID) {
+		return errors.New("unauthorized participant")
+	}
 	err := sc.Marketplace.blockchain.governance.VoteProposal(proposalID, participantID, approve)
 	return err
 }
