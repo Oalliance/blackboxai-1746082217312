@@ -11,6 +11,7 @@ require (
 	github.com/ipfs/go-ipfs-api v0.7.0
 	github.com/libp2p/go-libp2p v0.41.1
 	github.com/stretchr/testify v1.10.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -137,4 +138,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.4.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
-)replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f
+)
